@@ -1,0 +1,551 @@
+"""Agent Core component for orchestrating LLM interactions and tool calling."""
+
+from typing import Dict, List, Optional, Any
+from src.models import AgentResponse, ToolCall, ToolResult
+from src.todo_manager import ToDoManager
+from src.memory_system import MemorySystem
+
+
+class AgentCore:
+    """Orchestrates LLM interactions with tool-calling capabilities.
+    
+    The AgentCore receives user input, analyzes intent using an LLM with function
+    calling, executes appropriate tools (To-Do Manager, Memory System), and generates
+    natural language responses incorporating tool results.
+    """
+    
+    def __init__(
+        self,
+        openai_client,
+        todo_manager: ToDoManager,
+        memory_system: MemorySystem,
+        system_prompt: Optional[str] = None
+    ):
+        """Initialize the AgentCore with LLM client and tools.
+        
+        Args:
+            openai_client: OpenAI client instance for LLM API calls
+            todo_manager: ToDoManager instance for task operations
+            memory_system: MemorySystem instance for memory operations
+            system_prompt: Optional custom system prompt (uses default if None)
+        """
+        self._client = openai_client
+        self._todo_manager = todo_manager
+        self._memory_system = memory_system
+        self._system_prompt = system_prompt or self._get_default_system_prompt()
+        
+        from src.config import config
+        self._model = config.openai_model
+        
+        # Session-based conversation context storage
+        self._conversation_contexts: Dict[str, List[Dict]] = {}
+        
+        # Tool registry mapping tool names to handler methods
+        self._tools = self._build_tool_registry()
+    
+    def _get_default_system_prompt(self) -> str:
+        """Returns the default system prompt for the agent.
+        
+        Returns:
+            str: System prompt defining agent personality and capabilities
+        """
+        from src.prompts import SYSTEM_PROMPT
+        return SYSTEM_PROMPT
+
+    
+    def _build_tool_registry(self) -> List[Dict]:
+        """Builds the tool registry with OpenAI function calling schemas.
+        
+        Returns:
+            List[Dict]: List of tool definitions in OpenAI function calling format
+        """
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "create_todo",
+                    "description": "Creates a new to-do item with the given description. The item will have 'pending' status initially.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "description": {
+                                "type": "string",
+                                "description": "The task description"
+                            },
+                            "status": {
+                                "type": "string",
+                                "description": "Optional status. Can be pending or completed."
+                            }
+                        },
+                        "required": ["description"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_todos",
+                    "description": "Returns all to-do items. Use this when the user wants to see their tasks.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {}
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "update_todo",
+                    "description": "Updates a to-do item's description and/or status. Status must be one of: pending, completed, cancelled.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "todo_id": {
+                                "type": "string",
+                                "description": "The unique identifier of the to-do item"
+                            },
+                            "description": {
+                                "type": "string",
+                                "description": "New description (optional)"
+                            },
+                            "status": {
+                                "type": "string",
+                                "enum": ["pending", "completed", "cancelled"],
+                                "description": "New status (optional)"
+                            }
+                        },
+                        "required": ["todo_id"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "delete_todo",
+                    "description": "Deletes a to-do item by its identifier.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "todo_id": {
+                                "type": "string",
+                                "description": "The unique identifier of the to-do item to delete"
+                            }
+                        },
+                        "required": ["todo_id"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "store_memory",
+                    "description": "Stores important information from the conversation for future recall. Use this for user preferences, facts about the user, or other information worth remembering.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "content": {
+                                "type": "string",
+                                "description": "The information to remember"
+                            },
+                            "tags": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Tags for categorizing the memory (e.g., 'preference', 'personal', 'work')"
+                            }
+                        },
+                        "required": ["content", "tags"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "recall_memories",
+                    "description": "Retrieves relevant memories from past conversations. Use this to get context about the user or previous interactions.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "Search query to find relevant memories"
+                            }
+                        },
+                        "required": ["query"]
+                    }
+                }
+            }
+        ]
+    
+    def process_input(self, user_input: str, session_id: str = "default") -> AgentResponse:
+        """Processes user input and returns an agent response.
+        
+        This method:
+        1. Retrieves relevant memories based on user input
+        2. Builds conversation context with memories
+        3. Calls LLM with function calling to determine tool usage
+        4. Executes any requested tools
+        5. Generates final response incorporating tool results
+        
+        Args:
+            user_input: The user's text input
+            session_id: Session identifier for context management (default: "default")
+            
+        Returns:
+            AgentResponse: Response containing text, tool calls, and success status
+        """
+        try:
+            # Initialize session context if needed
+            if session_id not in self._conversation_contexts:
+                self._conversation_contexts[session_id] = []
+            
+            # Retrieve relevant memories automatically
+            relevant_memories = self._memory_system.retrieve_memories(
+                query=user_input,
+                limit=3
+            )
+            
+            # Build messages with system prompt, memories, context, and user input
+            messages = self._build_messages(
+                user_input=user_input,
+                session_id=session_id,
+                memories=relevant_memories
+            )
+            
+            # Call LLM with function calling
+            response = self._client.chat.completions.create(
+                model=self._model,
+                messages=messages,
+                tools=self._tools,
+                tool_choice="auto"
+            )
+            
+            assistant_message = response.choices[0].message
+            
+            # Check if tools were called
+            tool_calls = []
+            tool_results = []
+            
+            if assistant_message.tool_calls:
+                # Execute each tool call
+                for tool_call in assistant_message.tool_calls:
+                    tool_name = tool_call.function.name
+                    import json
+                    tool_params = json.loads(tool_call.function.arguments)
+                    
+                    # Create ToolCall object
+                    tc = ToolCall(tool_name=tool_name, parameters=tool_params)
+                    tool_calls.append(tc)
+                    
+                    # Execute tool
+                    result = self.execute_tool(tool_name, tool_params)
+                    tool_results.append(result)
+                
+                # Format final response with tool results
+                final_text = self.format_response(
+                    messages=messages,
+                    assistant_message=assistant_message,
+                    tool_results=tool_results
+                )
+            else:
+                # No tools called, use direct response
+                final_text = assistant_message.content or ""
+            
+            # Update conversation context
+            self._conversation_contexts[session_id].append({
+                "role": "user",
+                "content": user_input
+            })
+            self._conversation_contexts[session_id].append({
+                "role": "assistant",
+                "content": final_text
+            })
+            
+            return AgentResponse(
+                text=final_text,
+                tool_calls=tool_calls,
+                success=True,
+                error=None
+            )
+            
+        except Exception as e:
+            # Handle any errors gracefully
+            error_message = f"I encountered an error processing your request: {str(e)}"
+            return AgentResponse(
+                text=error_message,
+                tool_calls=[],
+                success=False,
+                error=str(e)
+            )
+    
+    def _build_messages(
+        self,
+        user_input: str,
+        session_id: str,
+        memories: List[Any]
+    ) -> List[Dict]:
+        """Builds the message list for LLM API call.
+        
+        Args:
+            user_input: Current user input
+            session_id: Session identifier
+            memories: List of relevant Memory objects
+            
+        Returns:
+            List[Dict]: Messages in OpenAI chat format
+        """
+        messages = [{"role": "system", "content": self._system_prompt}]
+        
+        # Add memory context if available
+        if memories:
+            memory_context = "Relevant information from past conversations:\n"
+            for memory in memories:
+                memory_context += f"- {memory.content}\n"
+            messages.append({
+                "role": "system",
+                "content": memory_context
+            })
+        
+        # Add conversation history
+        context = self._conversation_contexts.get(session_id, [])
+        messages.extend(context)
+        
+        # Add current user input
+        messages.append({"role": "user", "content": user_input})
+        
+        return messages
+    
+    def execute_tool(self, tool_name: str, parameters: Dict) -> ToolResult:
+        """Executes a tool call and returns the result.
+        
+        Args:
+            tool_name: Name of the tool to execute
+            parameters: Dictionary of parameters for the tool
+            
+        Returns:
+            ToolResult: Result of the tool execution
+        """
+        try:
+            if tool_name == "create_todo":
+                item = self._todo_manager.create_todo(parameters["description"])
+                return ToolResult(
+                    tool_name=tool_name,
+                    success=True,
+                    result={
+                        "id": item.id,
+                        "description": item.description,
+                        "status": item.status
+                    },
+                    error=None
+                )
+            
+            elif tool_name == "list_todos":
+                items = self._todo_manager.list_todos()
+                return ToolResult(
+                    tool_name=tool_name,
+                    success=True,
+                    result=[
+                        {
+                            "id": item.id,
+                            "description": item.description,
+                            "status": item.status
+                        }
+                        for item in items
+                    ],
+                    error=None
+                )
+            
+            elif tool_name == "update_todo":
+                todo_id = parameters["todo_id"]
+                description = parameters.get("description")
+                status = parameters.get("status")
+                
+                item = self._todo_manager.update_todo(
+                    todo_id=todo_id,
+                    description=description,
+                    status=status
+                )
+                return ToolResult(
+                    tool_name=tool_name,
+                    success=True,
+                    result={
+                        "id": item.id,
+                        "description": item.description,
+                        "status": item.status
+                    },
+                    error=None
+                )
+            
+            elif tool_name == "delete_todo":
+                self._todo_manager.delete_todo(parameters["todo_id"])
+                return ToolResult(
+                    tool_name=tool_name,
+                    success=True,
+                    result={"deleted": True},
+                    error=None
+                )
+            
+            elif tool_name == "store_memory":
+                memory_id = self._memory_system.store_memory(
+                    content=parameters["content"],
+                    tags=parameters["tags"],
+                    context={}
+                )
+                return ToolResult(
+                    tool_name=tool_name,
+                    success=True,
+                    result={"memory_id": memory_id},
+                    error=None
+                )
+            
+            elif tool_name == "recall_memories":
+                query = parameters["query"]
+                limit = parameters.get("limit", 5)
+                
+                memories = self._memory_system.retrieve_memories(
+                    query=query,
+                    limit=limit
+                )
+                return ToolResult(
+                    tool_name=tool_name,
+                    success=True,
+                    result=[
+                        {
+                            "content": memory.content,
+                            "tags": memory.tags,
+                            "timestamp": memory.timestamp.isoformat()
+                        }
+                        for memory in memories
+                    ],
+                    error=None
+                )
+            
+            else:
+                return ToolResult(
+                    tool_name=tool_name,
+                    success=False,
+                    result=None,
+                    error=f"Unknown tool: {tool_name}"
+                )
+        
+        except KeyError as e:
+            return ToolResult(
+                tool_name=tool_name,
+                success=False,
+                result=None,
+                error=f"Item not found: {str(e)}"
+            )
+        except ValueError as e:
+            return ToolResult(
+                tool_name=tool_name,
+                success=False,
+                result=None,
+                error=f"Invalid input: {str(e)}"
+            )
+        except Exception as e:
+            return ToolResult(
+                tool_name=tool_name,
+                success=False,
+                result=None,
+                error=f"Tool execution failed: {str(e)}"
+            )
+    
+    def format_response(
+        self,
+        messages: List[Dict],
+        assistant_message: Any,
+        tool_results: List[ToolResult]
+    ) -> str:
+        """Formats tool results into a natural language response.
+        
+        This method calls the LLM again with tool results to generate
+        a natural language response that incorporates the tool outcomes.
+        
+        Args:
+            messages: The original conversation messages
+            assistant_message: The original assistant message with tool calls
+            tool_results: List of tool execution results
+            
+        Returns:
+            str: Natural language response incorporating tool results
+        """
+        try:
+            # Append the assistant's tool call message
+            messages.append(assistant_message)
+
+            
+            # Add tool call results
+            for i, tool_call in enumerate(assistant_message.tool_calls):
+                result = tool_results[i]
+                
+                # Format tool result message
+                if result.success:
+                    tool_message = {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": str(result.result)
+                    }
+                else:
+                    tool_message = {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": f"Error: {result.error}"
+                    }
+                messages.append(tool_message)
+            
+            # Get final response from LLM
+            response = self._client.chat.completions.create(
+                model=self._model,
+                messages=messages
+            )
+            
+            return response.choices[0].message.content or ""
+            
+        except Exception as e:
+            # Fallback to simple formatting if LLM call fails
+            return self._format_response_fallback(tool_results)
+    
+    def _format_response_fallback(self, tool_results: List[ToolResult]) -> str:
+        """Fallback method to format tool results without LLM.
+        
+        Args:
+            tool_results: List of tool execution results
+            
+        Returns:
+            str: Simple formatted response
+        """
+        if not tool_results:
+            return "I processed your request."
+        
+        responses = []
+        for result in tool_results:
+            if result.success:
+                if result.tool_name == "create_todo":
+                    responses.append(f"Created task: {result.result['description']}")
+                elif result.tool_name == "list_todos":
+                    if result.result:
+                        tasks = "\n".join([
+                            f"- {item['description']} ({item['status']})"
+                            for item in result.result
+                        ])
+                        responses.append(f"Your tasks:\n{tasks}")
+                    else:
+                        responses.append("You have no tasks.")
+                elif result.tool_name == "update_todo":
+                    responses.append(f"Updated task: {result.result['description']}")
+                elif result.tool_name == "delete_todo":
+                    responses.append("Task deleted.")
+                elif result.tool_name == "store_memory":
+                    responses.append("I'll remember that.")
+                elif result.tool_name == "recall_memories":
+                    if result.result:
+                        memories = "\n".join([
+                            f"- {mem['content']}"
+                            for mem in result.result
+                        ])
+                        responses.append(f"I recall:\n{memories}")
+                    else:
+                        responses.append("I don't have any relevant memories.")
+            else:
+                responses.append(f"Error: {result.error}")
+        
+        return " ".join(responses)
