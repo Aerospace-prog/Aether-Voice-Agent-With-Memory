@@ -227,6 +227,10 @@ document.querySelectorAll('.quick-btn').forEach(btn => {
 // ─── Events ───
 sendBtn.addEventListener('click', () => { unlockAudio(); sendMessage(); });
 voiceBtn.addEventListener('click', () => { unlockAudio(); toggleVoice(); });
+$('#cancel-voice-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    cancelVoice();
+});
 chatInput.addEventListener('keypress', (e) => { 
     if (e.key === 'Enter') { unlockAudio(); sendMessage(); } 
 });
