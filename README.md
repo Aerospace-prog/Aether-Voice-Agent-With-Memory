@@ -1,10 +1,10 @@
-# 🌌 NOVA · Voice AI Agent with Memory
+# 🌌 AETHER · Voice AI Agent with Memory
 
 [![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com/)
 [![Groq](https://img.shields.io/badge/Groq-f3d122?style=for-the-badge&logo=ai)](https://groq.com/)
 [![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
 
-**NOVA** is a premium, full-stack Voice AI Agent designed for high-performance productivity. It combines a stunning **Glassmorphic Bento Grid Dashboard** with powerful **Long-Term Memory** and **Task Management**, all powered by the lightning-fast Groq LPU inference engine.
+**AETHER** is a premium, full-stack Voice AI Agent designed for high-performance productivity. It combines a stunning **Glassmorphic Bento Grid Dashboard** with powerful **Long-Term Memory** and **Task Management**, all powered by the lightning-fast Groq LPU inference engine.
 
 ---
 
@@ -46,7 +46,7 @@
 - A **Groq API Key** (Get one at [console.groq.com](https://console.groq.com/))
 
 ### 2. Deployment with Docker (Recommended)
-The easiest way to run NOVA is using Docker:
+The easiest way to run AETHER is using Docker:
 
 ```bash
 # Clone the repository
@@ -87,11 +87,11 @@ uvicorn src.api:app --reload --port 8000
 1. Click the **Microphone** icon in the dashboard.
 2. Grant microphone permissions in your browser.
 3. Speak a command (e.g., *"Remember that I have a meeting tomorrow at 3pm"*).
-4. Click the mic again to stop. NOVA will transcribe, process, and update the UI live.
+4. Click the mic again to stop. AETHER will transcribe, process, and update the UI live.
 
 ### Quick Actions
 Use the **Quick Actions** bento cell for one-click access to:
-- **Recall**: Ask NOVA to summarize what it knows about you.
+- **Recall**: Ask AETHER to summarize what it knows about you.
 - **View Tasks**: Instantly list all pending to-dos.
 - **Summarize**: Get a snapshot of your current productivity state.
 
@@ -121,4 +121,4 @@ Nova-Voice-Agent-With-Memory/
 Distributed under the MIT License. See `LICENSE` for more information.
 
 ---
-**NOVA** — *The future of personal AI, one memory at a time.*
+**AETHER** — *The future of personal AI, one memory at a time.*

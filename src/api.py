@@ -16,7 +16,7 @@ from src.todo_manager import ToDoManager
 from src.memory_system import MemorySystem
 from src.agent_core import AgentCore
 
-app = FastAPI(title="Voice AI Agent API")
+app = FastAPI(title="AETHER Voice AI Agent API")
 
 # Allow CORS for local dev
 app.add_middleware(

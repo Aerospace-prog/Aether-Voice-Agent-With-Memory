@@ -150,7 +150,7 @@ body {
 
 /* ═══════════ BRAND CELL ═══════════ */
 .brand-inner { text-align:center; }
-.nova-logo { margin-bottom:16px; }
+.aether-logo { margin-bottom:16px; }
 .logo-ring { width:90px; height:90px; margin:0 auto; position:relative; }
 .ring-svg { width:100%; height:100%; animation:spinSlow 20s linear infinite; }
 .logo-core {

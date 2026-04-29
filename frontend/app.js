@@ -1,4 +1,4 @@
-/* ═══════════ NOVA · Voice AI Agent · Frontend Logic ═══════════ */
+/* ═══════════ AETHER · Voice AI Agent · Frontend Logic ═══════════ */
 
 const $ = (sel) => document.querySelector(sel);
 const chatContainer = $('#chat-container');
@@ -13,7 +13,7 @@ const memoryCount = $('#memory-count');
 const statMemories = $('#stat-memories');
 const statTasks = $('#stat-tasks');
 
-const sessionId = "nova_" + Math.random().toString(36).substr(2, 9);
+const sessionId = "aether_" + Math.random().toString(36).substr(2, 9);
 let mediaRecorder, audioChunks = [], isRecording = false;
 
 // ─── Messages ───
@@ -21,7 +21,7 @@ function appendMessage(text, isUser = false) {
     const msg = document.createElement('div');
     msg.className = `message ${isUser ? 'user-message' : 'ai-message'}`;
     const icon = isUser ? 'fa-user' : 'fa-atom';
-    const name = isUser ? 'You' : 'NOVA';
+    const name = isUser ? 'You' : 'AETHER';
     msg.innerHTML = `
         <div class="msg-avatar"><i class="fa-solid ${icon}"></i></div>
         <div class="msg-body">
@@ -37,7 +37,7 @@ function showTyping() {
     const el = document.createElement('div');
     el.id = id; el.className = 'message ai-message';
     el.innerHTML = `<div class="msg-avatar"><i class="fa-solid fa-atom"></i></div>
-        <div class="msg-body"><div class="msg-name">NOVA</div>
+        <div class="msg-body"><div class="msg-name">AETHER</div>
         <div class="msg-bubble"><i class="fa-solid fa-ellipsis fa-fade"></i> Thinking...</div></div>`;
     chatContainer.appendChild(el);
     chatContainer.scrollTop = chatContainer.scrollHeight;
