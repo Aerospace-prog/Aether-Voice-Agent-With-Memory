@@ -50,8 +50,8 @@ The easiest way to run AETHER is using Docker:
 
 ```bash
 # Clone the repository
-git clone https://github.com/Aerospace-prog/Nova-Voice-Agent-With-Memory.git
-cd Nova-Voice-Agent-With-Memory
+git clone https://github.com/Aerospace-prog/Aether-Voice-Agent-With-Memory.git
+cd Aether-Voice-Agent-With-Memory
 
 # Configure your API key
 echo "GROQ_API_KEY=your_key_here" > .env
@@ -100,7 +100,7 @@ Use the **Quick Actions** bento cell for one-click access to:
 ## 📁 Project Structure
 
 ```text
-Nova-Voice-Agent-With-Memory/
+Aether-Voice-Agent-With-Memory/
 ├── src/
 │   ├── api.py           # FastAPI Web Server
 │   ├── agent_core.py    # LLM & Tool-Calling Logic
