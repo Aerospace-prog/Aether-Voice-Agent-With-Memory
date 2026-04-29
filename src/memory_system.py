@@ -141,6 +141,20 @@ class MemorySystem:
         results.sort(key=lambda m: m.timestamp, reverse=True)
         return results
     
+    def clear_all_memories(self) -> bool:
+        """Clears all stored memories from memory and file.
+        
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            self._memories = {}
+            self._save_to_file()
+            return True
+        except Exception as e:
+            print(f"Error clearing memories: {e}")
+            return False
+    
     def _generate_embedding(self, text: str) -> List[float]:
         """Generate embedding vector for text using SentenceTransformers.
         

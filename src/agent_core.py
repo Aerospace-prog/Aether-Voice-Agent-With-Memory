@@ -173,6 +173,17 @@ class AgentCore:
                         "required": ["query"]
                     }
                 }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "clear_memories",
+                    "description": "Wipes the entire memory bank. Use this only when the user explicitly asks to 'clear all memories', 'delete all history', or 'forget everything'.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {}
+                    }
+                }
             }
         ]
     
@@ -486,15 +497,24 @@ class AgentCore:
                     success=True,
                     result=[
                         {
-                            "content": memory.content,
-                            "tags": memory.tags,
-                            "timestamp": memory.timestamp.isoformat()
+                            "id": m.id,
+                            "content": m.content,
+                            "tags": m.tags,
+                            "timestamp": m.timestamp.isoformat()
                         }
-                        for memory in memories
+                        for m in memories
                     ],
                     error=None
                 )
-            
+
+            elif tool_name == "clear_memories":
+                success = self._memory_system.clear_all_memories()
+                return ToolResult(
+                    tool_name=tool_name,
+                    success=success,
+                    result={"cleared": success},
+                    error=None if success else "Failed to clear memories"
+                )
             else:
                 return ToolResult(
                     tool_name=tool_name,
