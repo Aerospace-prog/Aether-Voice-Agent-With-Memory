@@ -26,7 +26,7 @@ def load_config() -> Config:
         
     return Config(
         groq_api_key=groq_api_key,
-        openai_model=os.getenv("OPENAI_MODEL", "llama-3.3-70b-versatile"),
+        openai_model=os.getenv("OPENAI_MODEL", "llama-3.1-8b-instant"),
         openai_tts_voice=os.getenv("OPENAI_TTS_VOICE", "en"),
         openai_whisper_model=os.getenv("OPENAI_WHISPER_MODEL", "whisper-large-v3"),
         data_dir=os.path.expanduser(os.getenv("DATA_DIR", "~/.voice-agent"))

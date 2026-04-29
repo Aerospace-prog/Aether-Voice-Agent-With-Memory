@@ -223,14 +223,23 @@ class AgentCore:
             )
             
             # Call LLM with function calling
-            response = self._client.chat.completions.create(
-                model=self._model,
-                messages=messages,
-                tools=self._tools,
-                tool_choice="auto"
-            )
-            
-            assistant_message = response.choices[0].message
+            try:
+                response = self._client.chat.completions.create(
+                    model=self._model,
+                    messages=messages,
+                    tools=self._tools,
+                    tool_choice="auto"
+                )
+                assistant_message = response.choices[0].message
+            except Exception as api_err:
+                # If tool calling validation fails (common Groq/Llama quirk), 
+                # fallback to a simple chat completion without tools
+                print(f"Warning: Tool calling failed, falling back to chat: {api_err}")
+                response = self._client.chat.completions.create(
+                    model=self._model,
+                    messages=messages
+                )
+                assistant_message = response.choices[0].message
             
             # Check if tools were called
             tool_calls = []
@@ -241,7 +250,14 @@ class AgentCore:
                 for tool_call in assistant_message.tool_calls:
                     tool_name = tool_call.function.name
                     import json
-                    tool_params = json.loads(tool_call.function.arguments)
+                    try:
+                        tool_params = json.loads(tool_call.function.arguments)
+                    except:
+                        # Sometimes arguments are malformed, try to fix common Llama issues
+                        raw_args = tool_call.function.arguments
+                        if "{" not in raw_args:
+                            continue # Skip malformed call
+                        tool_params = json.loads(raw_args[raw_args.find("{"):raw_args.rfind("}")+1])
                     
                     # Create ToolCall object
                     tc = ToolCall(tool_name=tool_name, parameters=tool_params)
@@ -285,6 +301,18 @@ class AgentCore:
                 "role": "assistant",
                 "content": final_text
             })
+
+            # --- Intent-Based Auto-Storage Fallback ---
+            # If no formal tool was called, but the AI's response suggests it 
+            # intended to remember something, we manually trigger a memory save.
+            memory_keywords = ["i've remembered", "i will remember", "i've noted", "i've saved that", "noted your preference"]
+            if not tool_calls and any(k in final_text.lower() for k in memory_keywords):
+                # Use the user's input as the memory content
+                print(f"[AETHER] Auto-storing memory based on intent: {user_input}")
+                self._memory_system.store_memory(
+                    content=user_input,
+                    tags=["auto-captured", "preference"]
+                )
             
             return AgentResponse(
                 text=final_text,
