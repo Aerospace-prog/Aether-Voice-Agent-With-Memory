@@ -13,6 +13,83 @@ const memoryCount = $('#memory-count');
 const statMemories = $('#stat-memories');
 const statTasks = $('#stat-tasks');
 
+// ─── Speech Synthesis (TTS) ───
+let selectedVoice = null;
+let voicesLoaded = false;
+
+// Known high-quality female voice names across platforms
+const PREFERRED_FEMALE_VOICES = [
+    'Samantha',           // macOS default female
+    'Zoe',                // macOS premium
+    'Victoria',           // macOS
+    'Karen',              // macOS Australian
+    'Moira',              // macOS Irish
+    'Tessa',              // macOS South African
+    'Google UK English Female',  // Chrome
+    'Microsoft Zira',     // Windows
+    'Microsoft Hazel',    // Windows UK
+];
+
+function selectBestVoice() {
+    const voices = window.speechSynthesis.getVoices();
+    if (!voices.length) return false;
+    
+    // Try preferred voices in order
+    for (const name of PREFERRED_FEMALE_VOICES) {
+        const match = voices.find(v => v.name === name && v.lang.startsWith('en'));
+        if (match) {
+            selectedVoice = match;
+            console.log('[AETHER TTS] Selected voice:', match.name, match.lang);
+            voicesLoaded = true;
+            return true;
+        }
+    }
+    
+    // Fallback: any English female voice
+    const anyFemale = voices.find(v => v.lang.startsWith('en') && v.name.toLowerCase().includes('female'));
+    if (anyFemale) {
+        selectedVoice = anyFemale;
+        console.log('[AETHER TTS] Fallback female voice:', anyFemale.name);
+        voicesLoaded = true;
+        return true;
+    }
+    
+    // Last resort: any English voice
+    const anyEnglish = voices.find(v => v.lang.startsWith('en'));
+    if (anyEnglish) {
+        selectedVoice = anyEnglish;
+        console.log('[AETHER TTS] Fallback English voice:', anyEnglish.name);
+        voicesLoaded = true;
+        return true;
+    }
+    
+    voicesLoaded = true;
+    return false;
+}
+
+// Load voices — handle both sync and async loading
+if (window.speechSynthesis) {
+    selectBestVoice();  // Try immediately (works in some browsers)
+    window.speechSynthesis.onvoiceschanged = selectBestVoice;  // Async fallback
+}
+
+function speak(text) {
+    if (!window.speechSynthesis || !text || !text.trim()) return;
+    window.speechSynthesis.cancel();
+    
+    const utterance = new SpeechSynthesisUtterance(text);
+    
+    // Re-select voice if not yet loaded
+    if (!selectedVoice) selectBestVoice();
+    if (selectedVoice) utterance.voice = selectedVoice;
+    
+    utterance.pitch = 1.05;
+    utterance.rate = 0.95;  // Slightly slower for natural feel
+    utterance.volume = 1.0;
+    
+    window.speechSynthesis.speak(utterance);
+}
+
 const sessionId = "aether_" + Math.random().toString(36).substr(2, 9);
 let mediaRecorder, audioChunks = [], isRecording = false;
 
@@ -48,7 +125,10 @@ function hideTyping(id) { const el = document.getElementById(id); if (el) el.rem
 function handleResponse(data, tid) {
     hideTyping(tid);
     if (data.success) {
-        appendMessage(data.text);
+        if (data.text) {
+            appendMessage(data.text);
+            speak(data.text);
+        }
         if (data.tool_calls && data.tool_calls.length > 0) { fetchTodos(); fetchMemories(); }
     } else { appendMessage("Error: " + (data.error || "Unknown error")); }
 }
@@ -147,16 +227,36 @@ async function sendVoice(blob) {
     } catch (e) { hideTyping(tid); appendMessage("Voice error: " + e.message); }
 }
 
+// ─── Audio Engine Unlocker ───
+// Browsers block TTS if it fires after an async fetch (user gesture timeout).
+// We bypass this by playing a silent utterance immediately on click.
+let audioUnlocked = false;
+function unlockAudio() {
+    if (audioUnlocked || !window.speechSynthesis) return;
+    const prime = new SpeechSynthesisUtterance(' ');
+    prime.volume = 0;
+    prime.rate = 10;
+    window.speechSynthesis.speak(prime);
+    audioUnlocked = true;
+    console.log('[AETHER TTS] Audio engine unlocked permanently for this session.');
+}
+
 // ─── Quick Actions ───
 document.querySelectorAll('.quick-btn').forEach(btn => {
-    btn.addEventListener('click', () => sendMessage(btn.dataset.prompt));
+    btn.addEventListener('click', () => { 
+        unlockAudio(); 
+        sendMessage(btn.dataset.prompt); 
+    });
 });
 
 // ─── Events ───
-sendBtn.addEventListener('click', () => sendMessage());
-voiceBtn.addEventListener('click', toggleVoice);
-chatInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(); });
+sendBtn.addEventListener('click', () => { unlockAudio(); sendMessage(); });
+voiceBtn.addEventListener('click', () => { unlockAudio(); toggleVoice(); });
+chatInput.addEventListener('keypress', (e) => { 
+    if (e.key === 'Enter') { unlockAudio(); sendMessage(); } 
+});
 $('#clear-chat-btn')?.addEventListener('click', () => {
+    unlockAudio();
     chatContainer.innerHTML = '';
     appendMessage("Chat cleared. How can I help?");
 });

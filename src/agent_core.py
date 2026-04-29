@@ -226,7 +226,7 @@ class AgentCore:
             tool_results = []
             
             if assistant_message.tool_calls:
-                # Execute each tool call
+                # Execute each tool call (proper API path)
                 for tool_call in assistant_message.tool_calls:
                     tool_name = tool_call.function.name
                     import json
@@ -247,8 +247,23 @@ class AgentCore:
                     tool_results=tool_results
                 )
             else:
-                # No tools called, use direct response
-                final_text = assistant_message.content or ""
+                # No proper tool calls — check if the LLM embedded tool calls
+                # as raw text (common Llama-3 behavior)
+                raw_content = assistant_message.content or ""
+                inline_calls = self._parse_inline_tool_calls(raw_content)
+                
+                if inline_calls:
+                    # Execute the parsed inline tool calls
+                    for tool_name, tool_params in inline_calls:
+                        tc = ToolCall(tool_name=tool_name, parameters=tool_params)
+                        tool_calls.append(tc)
+                        result = self.execute_tool(tool_name, tool_params)
+                        tool_results.append(result)
+                    
+                    # Generate a clean natural language response
+                    final_text = self._format_response_fallback(tool_results)
+                else:
+                    final_text = raw_content
             
             # Update conversation context
             self._conversation_contexts[session_id].append({
@@ -277,6 +292,53 @@ class AgentCore:
                 error=str(e)
             )
     
+    def _parse_inline_tool_calls(self, text: str) -> list:
+        """Parses tool calls embedded as raw text by the LLM.
+        
+        Llama-3 sometimes emits tool calls as raw strings instead of using
+        the proper tool-calling API. Known formats:
+          <function@update_todo>{"todo_id": "...", "status": "completed"}</function>
+          <function=create_todo>{"description": "..."}</function>
+          <function(update_todo)>{"todo_id": "..."}</function>
+          <function(update_todo){"todo_id": "..."}</function>
+        
+        This method detects and parses those into (tool_name, params) tuples.
+        
+        Args:
+            text: Raw response text from the LLM
+            
+        Returns:
+            List of (tool_name, params_dict) tuples, empty if none found
+        """
+        import re
+        import json
+        
+        results = []
+        
+        # Comprehensive patterns for all known Llama-3 inline function call formats
+        patterns = [
+            # <function@tool_name>{...}</function>  or  <function=tool_name>{...}</function>
+            r'<function[@=](\w+)>\s*(\{.*?\})\s*</function>',
+            # <function(tool_name)>{...}</function>  or  <function(tool_name){...}</function>
+            r'<function\((\w+)\)>?\s*(\{.*?\})\s*(?:</function>)?',
+            # <|python_tag|>tool_name.call({...})
+            r'<\|python_tag\|>\s*(\w+)\.call\s*\(\s*(\{.*?\})\s*\)',
+            # Bare tool_name({...}) pattern
+            r'\b(create_todo|update_todo|delete_todo|list_todos|store_memory|recall_memories)\s*\(\s*(\{.*?\})\s*\)',
+        ]
+        
+        for pattern in patterns:
+            matches = re.findall(pattern, text, re.DOTALL)
+            for match in matches:
+                tool_name = match[0]
+                try:
+                    params = json.loads(match[1])
+                    results.append((tool_name, params))
+                except json.JSONDecodeError:
+                    continue
+        
+        return results
+    
     def _build_messages(
         self,
         user_input: str,
@@ -294,6 +356,20 @@ class AgentCore:
             List[Dict]: Messages in OpenAI chat format
         """
         messages = [{"role": "system", "content": self._system_prompt}]
+        
+        # ── Inject current task list so the agent can match by description ──
+        try:
+            current_todos = self._todo_manager.list_todos()
+            if current_todos:
+                task_context = "# YOUR CURRENT TASK LIST (use these IDs for update_todo / delete_todo):\n"
+                for todo in current_todos:
+                    task_context += f"- ID: \"{todo.id}\" | Description: \"{todo.description}\" | Status: {todo.status}\n"
+                task_context += "\nWhen the user refers to a task by name, match it to one of the above and use the corresponding ID.\n"
+            else:
+                task_context = "# YOUR CURRENT TASK LIST: (empty — no tasks exist yet)\n"
+            messages.append({"role": "system", "content": task_context})
+        except Exception:
+            pass  # If task list fails to load, continue without it
         
         # Add memory context if available
         if memories:
