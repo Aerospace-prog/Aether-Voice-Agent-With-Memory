@@ -20,13 +20,26 @@ class MemorySystem:
     """
     
     def __init__(self, storage_path: Optional[str] = None):
-        """Initialize the MemorySystem with persistent storage.
-        
-        Args:
-            storage_path: Path to JSON storage file. Defaults to ~/.voice-agent/memories.json
-        """
+        """Initialize the MemorySystem with persistent storage."""
         self._memories: Dict[str, Memory] = {}
         
+        # Cloud Persistence Check
+        self._mongo_uri = os.environ.get("MONGO_URI")
+        self._db = None
+        self._collection = None
+        
+        if self._mongo_uri:
+            try:
+                from pymongo import MongoClient
+                client = MongoClient(self._mongo_uri)
+                self._db = client.get_database("aether")
+                self._collection = self._db.get_collection("memories")
+                print("[AETHER] Connected to Cloud Persistence (MongoDB)")
+                self._load_from_mongo()
+                return
+            except Exception as e:
+                print(f"[AETHER] Failed to connect to MongoDB: {e}. Falling back to local storage.")
+
         # Set storage path
         if storage_path is None:
             storage_path = os.path.expanduser("~/.voice-agent/memories.json")
@@ -34,6 +47,13 @@ class MemorySystem:
         
         # Load existing memories from file
         self._load_from_file()
+
+    def _load_from_mongo(self) -> None:
+        """Load memories from MongoDB."""
+        self._memories = {}
+        for doc in self._collection.find():
+            memory = Memory.from_dict(doc)
+            self._memories[memory.id] = memory
     
     def store_memory(self, content: str, tags: Optional[List[str]] = None, 
                     context: Optional[Dict] = None) -> str:
@@ -278,30 +298,50 @@ class MemorySystem:
             # Handle file system errors (permissions, etc.)
             raise IOError(f"Failed to read memories file {self._storage_path}: {e}")
     
-    def _save_to_file(self) -> None:
-        """Save memories to JSON file.
-        
-        Ensures data consistency by writing to a temporary file first,
-        then atomically replacing the original file.
-        
-        Raises:
-            IOError: If file write operation fails
-        """
+    def _sync(self, item: Optional[Memory] = None, clear_all: bool = False) -> None:
+        """Synchronize changes to the storage backend (File or MongoDB)."""
+        if self._collection:
+            try:
+                if clear_all:
+                    self._collection.delete_many({})
+                elif item:
+                    self._collection.replace_one({"id": item.id}, item.to_dict(), upsert=True)
+                return
+            except Exception as e:
+                print(f"[AETHER] MongoDB Sync Error: {e}")
+
+        # Fallback to local file
+        self._save_to_file()
+
+    def store_memory(self, content: str, tags: Optional[List[str]] = None, context: Optional[Dict] = None) -> str:
+        if not content or not content.strip(): raise ValueError("Memory content cannot be empty")
+        if tags is None: tags = []
+        if context is None: context = {}
+        memory_id = str(uuid.uuid4())
+        timestamp = datetime.now()
+        embedding = self._generate_embedding(content)
+        memory = Memory(id=memory_id, content=content, tags=tags, context=context, timestamp=timestamp, embedding=embedding)
+        self._memories[memory_id] = memory
+        self._sync(item=memory)
+        return memory_id
+
+    def clear_all_memories(self) -> bool:
         try:
-            # Ensure directory exists
+            self._memories = {}
+            self._sync(clear_all=True)
+            return True
+        except Exception as e:
+            print(f"Error clearing memories: {e}")
+            return False
+
+    def _save_to_file(self) -> None:
+        """Save memories to JSON file."""
+        try:
             os.makedirs(os.path.dirname(self._storage_path), exist_ok=True)
-            
-            # Serialize all memories
             data = [memory.to_dict() for memory in self._memories.values()]
-            
-            # Write to temporary file first for atomic operation
             temp_path = self._storage_path + '.tmp'
             with open(temp_path, 'w') as f:
                 json.dump(data, f, indent=2)
-            
-            # Atomically replace the original file
             os.replace(temp_path, self._storage_path)
-            
         except OSError as e:
-            # Handle file system errors (permissions, disk full, etc.)
             raise IOError(f"Failed to save memories to {self._storage_path}: {e}")

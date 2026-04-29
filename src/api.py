@@ -26,6 +26,10 @@ app = FastAPI(title="AETHER Voice AI Agent API")
 async def favicon():
     return Response(status_code=204)
 
+@app.get("/health")
+async def health_check():
+    return {"status": "online", "agent": "AETHER"}
+
 @app.get("/api/tts")
 async def get_tts(text: str):
     """Generate TTS audio from text and stream it."""

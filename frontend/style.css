@@ -319,7 +319,13 @@ body {
 .hidden { display:none !important; }
 
 /* ═══════════ TASKS & MEMORY LISTS ═══════════ */
-.todo-list, .memory-list { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:10px; min-height: 0; }
+.todo-list, .memory-list { 
+    flex:1; overflow-y:auto; padding:16px; padding-bottom:40px; 
+    display:flex; flex-direction:column; gap:10px; min-height: 0; 
+}
+.todo-list::-webkit-scrollbar, .memory-list::-webkit-scrollbar, .chat-container::-webkit-scrollbar { width:4px; }
+.todo-list::-webkit-scrollbar-thumb, .memory-list::-webkit-scrollbar-thumb, .chat-container::-webkit-scrollbar-thumb { background:rgba(0,240,255,0.2); border-radius:10px; }
+.todo-list::-webkit-scrollbar-track, .memory-list::-webkit-scrollbar-track, .chat-container::-webkit-scrollbar-track { background:transparent; }
 
 .todo-item, .memory-item {
     padding:14px 16px; border-radius:var(--radius-sm);

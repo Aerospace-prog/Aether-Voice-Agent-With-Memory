@@ -72,11 +72,19 @@ function appendMessage(text, isUser = false) {
     msg.className = `message ${isUser ? 'user-message' : 'ai-message'}`;
     const icon = isUser ? 'fa-user' : 'fa-atom';
     const name = isUser ? 'You' : 'AETHER';
+    
+    // Better list/newline handling for J.A.R.V.I.S. HUD
+    let formattedText = text.replace(/\n/g, '<br>');
+    if (!isUser) {
+        // Simple regex to indent numbered lists
+        formattedText = formattedText.replace(/(\d+\.\s)/g, '<br><strong>$1</strong>');
+    }
+
     msg.innerHTML = `
         <div class="msg-avatar"><i class="fa-solid ${icon}"></i></div>
         <div class="msg-body">
             <div class="msg-name">${name}</div>
-            <div class="msg-bubble">${text.replace(/\n/g,'<br>')}</div>
+            <div class="msg-bubble">${formattedText}</div>
         </div>`;
     chatContainer.appendChild(msg);
     chatContainer.scrollTop = chatContainer.scrollHeight;
@@ -128,11 +136,18 @@ async function sendMessage(text = null) {
 async function fetchTodos() {
     try {
         const todos = await (await fetch('/api/todos')).json();
-        taskCount.textContent = todos.length;
-        statTasks.textContent = todos.length;
+        const pendingCount = todos.filter(t => t.status !== 'completed').length;
+        
+        taskCount.textContent = pendingCount;
+        statTasks.textContent = pendingCount;
+        
         todoList.innerHTML = '';
         if (!todos.length) { todoList.innerHTML = '<div class="empty-state"><i class="fa-regular fa-circle-check"></i><p>No tasks yet</p></div>'; return; }
-        todos.forEach(t => {
+        
+        // Show pending first
+        const sorted = [...todos].sort((a, b) => (a.status === 'completed' ? 1 : -1));
+        
+        sorted.forEach(t => {
             const ic = t.status === 'completed' ? 'fa-circle-check' : 'fa-circle';
             const cl = t.status === 'completed' ? 'var(--success)' : 'var(--warn)';
             todoList.innerHTML += `<div class="todo-item">

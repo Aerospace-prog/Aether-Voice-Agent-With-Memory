@@ -17,13 +17,26 @@ class ToDoManager:
     """
     
     def __init__(self, storage_path: Optional[str] = None):
-        """Initialize the ToDoManager with persistent storage.
-        
-        Args:
-            storage_path: Path to JSON storage file. Defaults to ~/.voice-agent/todos.json
-        """
+        """Initialize the ToDoManager with persistent storage."""
         self._todos: Dict[str, ToDoItem] = {}
         
+        # Cloud Persistence Check
+        self._mongo_uri = os.environ.get("MONGO_URI")
+        self._db = None
+        self._collection = None
+        
+        if self._mongo_uri:
+            try:
+                from pymongo import MongoClient
+                client = MongoClient(self._mongo_uri)
+                self._db = client.get_database("aether")
+                self._collection = self._db.get_collection("todos")
+                print("[AETHER] Connected to Cloud Persistence (MongoDB)")
+                self._load_from_mongo()
+                return
+            except Exception as e:
+                print(f"[AETHER] Failed to connect to MongoDB: {e}. Falling back to local storage.")
+
         # Set storage path
         if storage_path is None:
             storage_path = os.path.expanduser("~/.voice-agent/todos.json")
@@ -31,6 +44,14 @@ class ToDoManager:
         
         # Load existing todos from file
         self._load_from_file()
+
+    def _load_from_mongo(self) -> None:
+        """Load todos from MongoDB."""
+        self._todos = {}
+        for doc in self._collection.find():
+            # Use doc['id'] instead of _id
+            item = ToDoItem.from_dict(doc)
+            self._todos[item.id] = item
     
     def create_todo(self, description: str) -> ToDoItem:
         """Creates a new to-do item with pending status.
@@ -188,30 +209,61 @@ class ToDoManager:
             # Handle file system errors (permissions, etc.)
             raise IOError(f"Failed to read todos file {self._storage_path}: {e}")
     
+    def _sync(self, item: Optional[ToDoItem] = None, delete_id: Optional[str] = None) -> None:
+        """Synchronize changes to the storage backend (File or MongoDB)."""
+        if self._collection:
+            try:
+                if delete_id:
+                    self._collection.delete_one({"id": delete_id})
+                elif item:
+                    self._collection.replace_one({"id": item.id}, item.to_dict(), upsert=True)
+                return
+            except Exception as e:
+                print(f"[AETHER] MongoDB Sync Error: {e}")
+
+        # Fallback to local file
+        self._save_to_file()
+
+    def create_todo(self, description: str) -> ToDoItem:
+        if not description or not description.strip():
+            raise ValueError("Description cannot be empty")
+        now = datetime.now()
+        todo_id = str(uuid.uuid4())
+        item = ToDoItem(id=todo_id, description=description, status="pending", created_at=now, updated_at=now)
+        self._todos[todo_id] = item
+        self._sync(item=item)
+        return item
+    
+    def update_todo(self, todo_id: str, description: Optional[str] = None, status: Optional[str] = None) -> ToDoItem:
+        if todo_id not in self._todos:
+            raise KeyError(f"To-do item {todo_id} not found")
+        item = self._todos[todo_id]
+        if description is not None:
+            if not description or not description.strip(): raise ValueError("Description cannot be empty")
+            item.description = description
+        if status is not None:
+            if status not in ToDoItem.VALID_STATUSES:
+                raise ValueError(f"Invalid status '{status}'. Must be one of: {', '.join(sorted(ToDoItem.VALID_STATUSES))}")
+            item.status = status
+        item.updated_at = datetime.now()
+        self._sync(item=item)
+        return item
+    
+    def delete_todo(self, todo_id: str) -> bool:
+        if todo_id not in self._todos:
+            raise KeyError(f"To-do item {todo_id} not found")
+        del self._todos[todo_id]
+        self._sync(delete_id=todo_id)
+        return True
+
     def _save_to_file(self) -> None:
-        """Save to-do items to JSON file.
-        
-        Ensures data consistency by writing to a temporary file first,
-        then atomically replacing the original file.
-        
-        Raises:
-            IOError: If file write operation fails
-        """
+        """Save to-do items to JSON file."""
         try:
-            # Ensure directory exists
             os.makedirs(os.path.dirname(self._storage_path), exist_ok=True)
-            
-            # Serialize all to-do items
             data = [item.to_dict() for item in self._todos.values()]
-            
-            # Write to temporary file first for atomic operation
             temp_path = self._storage_path + '.tmp'
             with open(temp_path, 'w') as f:
                 json.dump(data, f, indent=2)
-            
-            # Atomically replace the original file
             os.replace(temp_path, self._storage_path)
-            
         except OSError as e:
-            # Handle file system errors (permissions, disk full, etc.)
             raise IOError(f"Failed to save todos to {self._storage_path}: {e}")
