@@ -13,85 +13,58 @@ const memoryCount = $('#memory-count');
 const statMemories = $('#stat-memories');
 const statTasks = $('#stat-tasks');
 
-// ─── Speech Synthesis (TTS) ───
-let selectedVoice = null;
-let voicesLoaded = false;
+// ─── Speech Engine (AETHER High-Fidelity Voice) ───
+let currentAudio = null;
 
-// Known high-quality female voice names across platforms
-const PREFERRED_FEMALE_VOICES = [
-    'Samantha',           // macOS default female
-    'Zoe',                // macOS premium
-    'Victoria',           // macOS
-    'Karen',              // macOS Australian
-    'Moira',              // macOS Irish
-    'Tessa',              // macOS South African
-    'Google UK English Female',  // Chrome
-    'Microsoft Zira',     // Windows
-    'Microsoft Hazel',    // Windows UK
-];
+async function speak(text, audioB64 = null) {
+    if (!text || !text.trim()) return;
 
-function selectBestVoice() {
-    const voices = window.speechSynthesis.getVoices();
-    if (!voices.length) return false;
-    
-    // Try preferred voices in order
-    for (const name of PREFERRED_FEMALE_VOICES) {
-        const match = voices.find(v => v.name === name && v.lang.startsWith('en'));
-        if (match) {
-            selectedVoice = match;
-            console.log('[AETHER TTS] Selected voice:', match.name, match.lang);
-            voicesLoaded = true;
-            return true;
+    // Stop any currently playing audio
+    if (currentAudio) {
+        currentAudio.pause();
+        currentAudio.currentTime = 0;
+    }
+
+    try {
+        if (audioB64) {
+            console.log('[AETHER TTS] ▶️ Playing direct base64 audio...');
+            currentAudio = new Audio(`data:audio/mpeg;base64,${audioB64}`);
+        } else {
+            console.log('[AETHER TTS] 📥 Requesting stream for:', text.substring(0, 40) + '...');
+            currentAudio = new Audio(`/api/tts?text=${encodeURIComponent(text)}`);
+        }
+        
+        currentAudio.onplay = () => console.log('[AETHER TTS] ▶️ Audio started');
+        currentAudio.onended = () => console.log('[AETHER TTS] ✅ Audio finished');
+        currentAudio.onerror = (e) => console.error('[AETHER TTS] ❌ Audio error:', e);
+
+        await currentAudio.play();
+    } catch (e) {
+        console.warn('[AETHER TTS] Playback blocked, trying fallback...', e);
+        // Fallback to browser speech only if backend fails
+        if (window.speechSynthesis) {
+            window.speechSynthesis.cancel();
+            const u = new SpeechSynthesisUtterance(text);
+            u.rate = 0.9;
+            window.speechSynthesis.speak(u);
         }
     }
-    
-    // Fallback: any English female voice
-    const anyFemale = voices.find(v => v.lang.startsWith('en') && v.name.toLowerCase().includes('female'));
-    if (anyFemale) {
-        selectedVoice = anyFemale;
-        console.log('[AETHER TTS] Fallback female voice:', anyFemale.name);
-        voicesLoaded = true;
-        return true;
-    }
-    
-    // Last resort: any English voice
-    const anyEnglish = voices.find(v => v.lang.startsWith('en'));
-    if (anyEnglish) {
-        selectedVoice = anyEnglish;
-        console.log('[AETHER TTS] Fallback English voice:', anyEnglish.name);
-        voicesLoaded = true;
-        return true;
-    }
-    
-    voicesLoaded = true;
-    return false;
 }
 
-// Load voices — handle both sync and async loading
-if (window.speechSynthesis) {
-    selectBestVoice();  // Try immediately (works in some browsers)
-    window.speechSynthesis.onvoiceschanged = selectBestVoice;  // Async fallback
-}
-
-function speak(text) {
-    if (!window.speechSynthesis || !text || !text.trim()) return;
-    window.speechSynthesis.cancel();
+// ─── Audio Engine Unlocker ───
+function unlockAudio() {
+    // Standard Audio context unlock for browsers
+    const silent = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA==');
+    silent.play().then(() => {
+        console.log('[AETHER TTS] Audio engine unlocked.');
+    }).catch(() => {});
     
-    const utterance = new SpeechSynthesisUtterance(text);
-    
-    // Re-select voice if not yet loaded
-    if (!selectedVoice) selectBestVoice();
-    if (selectedVoice) utterance.voice = selectedVoice;
-    
-    utterance.pitch = 1.05;
-    utterance.rate = 0.95;  // Slightly slower for natural feel
-    utterance.volume = 1.0;
-    
-    window.speechSynthesis.speak(utterance);
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
 }
 
 const sessionId = "aether_" + Math.random().toString(36).substr(2, 9);
 let mediaRecorder, audioChunks = [], isRecording = false;
+
 
 // ─── Messages ───
 function appendMessage(text, isUser = false) {
@@ -127,9 +100,11 @@ function handleResponse(data, tid) {
     if (data.success) {
         if (data.text) {
             appendMessage(data.text);
-            speak(data.text);
+            speak(data.text, data.audio_b64);
         }
-        if (data.tool_calls && data.tool_calls.length > 0) { fetchTodos(); fetchMemories(); }
+        // Always refresh — memories can be auto-stored without formal tool calls
+        fetchTodos();
+        fetchMemories();
     } else { appendMessage("Error: " + (data.error || "Unknown error")); }
 }
 
@@ -188,6 +163,8 @@ async function fetchMemories() {
 // ─── Voice ───
 async function toggleVoice() { isRecording ? stopRecording() : startRecording(); }
 
+let shouldDiscardRecording = false;
+
 async function startRecording() {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -195,6 +172,11 @@ async function startRecording() {
         audioChunks = [];
         mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
         mediaRecorder.onstop = async () => {
+            if (shouldDiscardRecording) {
+                shouldDiscardRecording = false;
+                console.log('[AETHER Voice] Recording discarded.');
+                return;
+            }
             sendVoice(new Blob(audioChunks, { type: 'audio/webm' }));
         };
         mediaRecorder.start();
@@ -213,6 +195,13 @@ function stopRecording() {
     }
 }
 
+function cancelVoice() {
+    if (isRecording) {
+        shouldDiscardRecording = true;
+        stopRecording();
+    }
+}
+
 async function sendVoice(blob) {
     const fd = new FormData();
     fd.append('audio', blob, 'rec.webm');
@@ -225,20 +214,6 @@ async function sendVoice(blob) {
         if (data.transcription) appendMessage(data.transcription, true);
         handleResponse(data, tid);
     } catch (e) { hideTyping(tid); appendMessage("Voice error: " + e.message); }
-}
-
-// ─── Audio Engine Unlocker ───
-// Browsers block TTS if it fires after an async fetch (user gesture timeout).
-// We bypass this by playing a silent utterance immediately on click.
-let audioUnlocked = false;
-function unlockAudio() {
-    if (audioUnlocked || !window.speechSynthesis) return;
-    const prime = new SpeechSynthesisUtterance(' ');
-    prime.volume = 0;
-    prime.rate = 10;
-    window.speechSynthesis.speak(prime);
-    audioUnlocked = true;
-    console.log('[AETHER TTS] Audio engine unlocked permanently for this session.');
 }
 
 // ─── Quick Actions ───

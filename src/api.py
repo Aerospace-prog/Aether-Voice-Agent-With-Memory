@@ -16,7 +16,27 @@ from src.todo_manager import ToDoManager
 from src.memory_system import MemorySystem
 from src.agent_core import AgentCore
 
+from gtts import gTTS
+import io
+from fastapi.responses import JSONResponse, Response, StreamingResponse
+
 app = FastAPI(title="AETHER Voice AI Agent API")
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return Response(status_code=204)
+
+@app.get("/api/tts")
+async def get_tts(text: str):
+    """Generate TTS audio from text and stream it."""
+    try:
+        tts = gTTS(text=text, lang='en', tld='com') # 'com' for US English
+        fp = io.BytesIO()
+        tts.write_to_fp(fp)
+        fp.seek(0)
+        return StreamingResponse(fp, media_type="audio/mpeg")
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 # Allow CORS for local dev
 app.add_middleware(
@@ -49,13 +69,33 @@ class ChatRequest(BaseModel):
     message: str
     session_id: str = "web_default"
 
+import base64
+
+def text_to_base64_audio(text: str) -> str:
+    """Generate TTS MP3 and return as base64 string."""
+    try:
+        if not text or len(text.strip()) == 0:
+            return ""
+        # Limit text length to prevent huge responses
+        short_text = text[:800] 
+        tts = gTTS(text=short_text, lang='en', tld='com')
+        fp = io.BytesIO()
+        tts.write_to_fp(fp)
+        fp.seek(0)
+        return base64.b64encode(fp.read()).decode('utf-8')
+    except Exception as e:
+        print(f"TTS Error: {e}")
+        return ""
+
 @app.post("/api/chat")
 async def chat_endpoint(req: ChatRequest):
     try:
         response = agent_core.process_input(req.message, session_id=req.session_id)
+        audio_b64 = text_to_base64_audio(response.text)
         
         return {
             "text": response.text,
+            "audio_b64": audio_b64,
             "success": response.success,
             "error": response.error,
             "tool_calls": [tc.tool_name for tc in response.tool_calls]
@@ -82,10 +122,12 @@ async def voice_endpoint(audio: UploadFile = File(...), session_id: str = "web_d
             
             # Process text
             response = agent_core.process_input(transcription, session_id=session_id)
+            audio_b64 = text_to_base64_audio(response.text)
             
             return {
                 "transcription": transcription,
                 "text": response.text,
+                "audio_b64": audio_b64,
                 "success": response.success,
                 "error": response.error,
                 "tool_calls": [tc.tool_name for tc in response.tool_calls]
