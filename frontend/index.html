@@ -3,13 +3,38 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AETHER · Voice AI Agent</title>
-    <meta name="description" content="AETHER — a premium voice-powered AI agent with memory, task management, and intelligent conversation.">
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <title>AETHER · J.A.R.V.I.S. Interface</title>
+    <meta name="description" content="AETHER — a JARVIS-inspired voice AI agent with memory, task management, and intelligent conversation.">
+    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@300;400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 </head>
 <body>
+    <!-- Boot Sequence Overlay -->
+    <div class="boot-overlay" id="boot-overlay">
+        <div class="boot-text" id="boot-text">INITIALIZING AETHER...</div>
+        <div class="boot-bar"><div class="boot-bar-fill"></div></div>
+    </div>
+
+    <!-- Scanline Overlay -->
+    <div class="scanlines"></div>
+
+    <!-- HUD Top Bar -->
+    <div class="hud-bar">
+        <div class="hud-left">
+            <span class="hud-indicator"><span class="dot"></span> ONLINE</span>
+            <span>MODEL: LLAMA-3.1</span>
+        </div>
+        <div class="hud-center">A E T H E R</div>
+        <div class="hud-right">
+            <span id="hud-clock">00:00:00</span>
+            <span>v2.0</span>
+        </div>
+    </div>
+
+    <!-- Particle Canvas -->
+    <canvas id="particle-canvas"></canvas>
+
     <!-- Ambient Background Effects -->
     <div class="ambient-bg">
         <div class="orb orb-1"></div>
@@ -37,11 +62,14 @@
                         <svg viewBox="0 0 100 100" class="ring-svg">
                             <defs>
                                 <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
-                                    <stop offset="0%" style="stop-color:#a78bfa;stop-opacity:1" />
-                                    <stop offset="100%" style="stop-color:#06b6d4;stop-opacity:1" />
+                                    <stop offset="0%" style="stop-color:#00f0ff;stop-opacity:1" />
+                                    <stop offset="100%" style="stop-color:#0080ff;stop-opacity:1" />
                                 </linearGradient>
                             </defs>
-                            <circle cx="50" cy="50" r="42" fill="none" stroke="url(#grad1)" stroke-width="2" stroke-dasharray="8 4" class="logo-orbit"/>
+                            <circle cx="50" cy="50" r="46" fill="none" stroke="rgba(0,240,255,0.1)" stroke-width="1"/>
+                            <circle cx="50" cy="50" r="42" fill="none" stroke="url(#grad1)" stroke-width="1.5" stroke-dasharray="8 4" class="logo-orbit"/>
+                            <circle cx="50" cy="50" r="36" fill="none" stroke="rgba(0,128,255,0.3)" stroke-width="1" stroke-dasharray="4 6" style="animation:spinSlow 15s linear infinite reverse"/>
+                            <circle cx="50" cy="50" r="30" fill="none" stroke="rgba(0,240,255,0.15)" stroke-width="0.5" stroke-dasharray="2 8"/>
                         </svg>
                         <div class="logo-core">
                             <i class="fa-solid fa-atom"></i>
