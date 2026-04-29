@@ -176,89 +176,29 @@ class MemorySystem:
             return False
     
     def _generate_embedding(self, text: str) -> List[float]:
-        """Generate embedding vector for text using SentenceTransformers.
-        
-        Args:
-            text: Text to generate embedding for
-            
-        Returns:
-            List[float]: Embedding vector
-            
-        Raises:
-            Exception: If embedding generation fails
-        """
-        try:
-            from sentence_transformers import SentenceTransformer
-            if not hasattr(self, '_embedding_model'):
-                self._embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
-            
-            # encode returns a numpy array, we need a list of floats
-            embedding = self._embedding_model.encode(text)
-            return embedding.tolist()
-        except Exception as e:
-            # Log error but don't fail the entire operation
-            print(f"Warning: Failed to generate embedding: {e}")
-            return None
-    
-    def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
-        """Calculate cosine similarity between two vectors.
-        
-        Args:
-            vec1: First vector
-            vec2: Second vector
-            
-        Returns:
-            float: Cosine similarity score between -1 and 1
-        """
-        if not vec1 or not vec2 or len(vec1) != len(vec2):
-            return 0.0
-        
-        # Calculate dot product
-        dot_product = sum(a * b for a, b in zip(vec1, vec2))
-        
-        # Calculate magnitudes
-        magnitude1 = math.sqrt(sum(a * a for a in vec1))
-        magnitude2 = math.sqrt(sum(b * b for b in vec2))
-        
-        # Avoid division by zero
-        if magnitude1 == 0 or magnitude2 == 0:
-            return 0.0
-        
-        return dot_product / (magnitude1 * magnitude2)
-    
+        """Skip embedding generation for cloud performance."""
+        return None
+
     def _semantic_search(self, query: str, limit: Optional[int] = None) -> List[Memory]:
-        """Search memories using semantic similarity.
+        """Lightweight keyword-based search for free cloud tier."""
+        if not query:
+            return self.retrieve_memories(limit=limit)
         
-        Args:
-            query: Search query text
-            limit: Maximum number of results to return
-            
-        Returns:
-            List[Memory]: Memories ordered by relevance (highest similarity first)
-        """
-        # Generate embedding for query
-        query_embedding = self._generate_embedding(query)
-        if query_embedding is None:
-            # Fall back to recency if embedding generation fails
-            return self.retrieve_memories(query=None, limit=limit)
-        
-        # Calculate similarity scores for all memories with embeddings
+        query_words = set(query.lower().split())
         scored_memories = []
+        
         for memory in self._memories.values():
-            if memory.embedding is not None:
-                similarity = self._cosine_similarity(query_embedding, memory.embedding)
-                scored_memories.append((memory, similarity))
+            content_lower = memory.content.lower()
+            # Score based on how many query words appear in the memory
+            score = sum(1 for word in query_words if word in content_lower)
+            if score > 0:
+                scored_memories.append((memory, score))
         
-        # Sort by similarity score (highest first)
-        scored_memories.sort(key=lambda x: x[1], reverse=True)
+        # Sort by score (highest match first), then by recency
+        scored_memories.sort(key=lambda x: (x[1], x[0].timestamp), reverse=True)
         
-        # Extract just the memories
-        results = [memory for memory, score in scored_memories]
-        
-        # Apply limit if specified
-        if limit is not None and limit > 0:
-            return results[:limit]
-        
+        results = [m for m, s in scored_memories]
+        if limit: return results[:limit]
         return results
     
     def _load_from_file(self) -> None:
